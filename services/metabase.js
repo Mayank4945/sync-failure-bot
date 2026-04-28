@@ -43,11 +43,31 @@ LIMIT 50
     }
   );
 
-  const { cols, rows } = res.data.data;
-  const colNames = cols.map((c) => c.name);
-  return rows.map((row) =>
-    Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
-  );
+  const body = res.data;
+
+  // Handle Metabase error responses
+  if (body.error) throw new Error(`Metabase query error: ${body.error}`);
+
+  // Format 1: standard API response → { data: { cols, rows } }
+  if (body.data?.cols && body.data?.rows) {
+    const { cols, rows } = body.data;
+    const colNames = cols.map((c) => c.name);
+    return rows.map((row) =>
+      Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
+    );
+  }
+
+  // Format 2: object with numeric keys → { "0": {...}, "1": {...} }
+  if (body.data && typeof body.data === "object" && body.data["0"]) {
+    return Object.values(body.data);
+  }
+
+  // Format 3: array directly
+  if (Array.isArray(body.data)) return body.data;
+  if (Array.isArray(body))      return body;
+
+  console.error("[metabase] Unexpected response shape:", JSON.stringify(body).slice(0, 300));
+  throw new Error("Unexpected Metabase response format");
 }
 
 module.exports = { fetchSyncFailures };
