@@ -2,7 +2,7 @@ const axios = require("axios");
 
 /**
  * Fetch SYNC_FAILED bills for a tenant from the last 30 days.
- * Auth: Metabase API key passed as x-api-key header.
+ * Auth: Metabase API key — tries both header formats.
  */
 async function fetchSyncFailures(tenantId) {
   if (!tenantId || tenantId === "mysa") {
@@ -11,13 +11,13 @@ async function fetchSyncFailures(tenantId) {
 
   const sql = `
 SELECT
-  bed.reference_id                                                     AS reference_id,
-  bed.bill_number                                                      AS bill_number,
-  bed.vendor_name                                                      AS vendor_name,
-  bed.status                                                           AS status,
-  COALESCE(meta_data.error.error[0].error::varchar,    '(no type)')   AS error_type,
+  bed.reference_id                                                      AS reference_id,
+  bed.bill_number                                                       AS bill_number,
+  bed.vendor_name                                                       AS vendor_name,
+  bed.status                                                            AS status,
+  COALESCE(meta_data.error.error[0].error::varchar,    '(no type)')    AS error_type,
   COALESCE(meta_data.error.error[0].message::varchar,  '(no message)') AS error_message,
-  bed.updated_at                                                       AS updated_at
+  bed.updated_at                                                        AS updated_at
 FROM talipot.bill_eligible_data bed
 WHERE bed.tenant_id   = '${tenantId}'
   AND bed.tenant_id  != 'mysa'
@@ -27,28 +27,40 @@ ORDER BY bed.updated_at DESC
 LIMIT 50
   `.trim();
 
-  const res = await axios.post(
-    `${process.env.METABASE_URL}/api/dataset`,
-    {
-      database: Number(process.env.METABASE_DATABASE_ID),
-      type: "native",
-      native: { query: sql },
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.METABASE_API_KEY,
-      },
-      timeout: 30000,
-    }
-  );
+  const payload = {
+    database: Number(process.env.METABASE_DATABASE_ID),
+    type: "native",
+    native: { query: sql },
+  };
+
+  // Metabase uses 'mb-api-key' header (newer versions)
+  // Fall back to 'x-api-key' if that fails
+  let res;
+  try {
+    res = await axios.post(
+      `${process.env.METABASE_URL}/api/dataset`,
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "mb-api-key": process.env.METABASE_API_KEY,
+        },
+        timeout: 30000,
+      }
+    );
+  } catch (err) {
+    // Log full error for debugging
+    console.error("[metabase] Request failed:", err.response?.status, JSON.stringify(err.response?.data || err.message).slice(0, 300));
+    throw err;
+  }
 
   const body = res.data;
+  console.log("[metabase] Response status:", res.status, "| body keys:", Object.keys(body || {}).join(", "));
 
-  // Handle Metabase error responses
-  if (body.error) throw new Error(`Metabase query error: ${body.error}`);
+  if (!body) throw new Error("Empty response from Metabase");
+  if (body.error) throw new Error(`Metabase error: ${body.error}`);
 
-  // Format 1: standard API response → { data: { cols, rows } }
+  // Standard format: { data: { cols, rows } }
   if (body.data?.cols && body.data?.rows) {
     const { cols, rows } = body.data;
     const colNames = cols.map((c) => c.name);
@@ -57,16 +69,15 @@ LIMIT 50
     );
   }
 
-  // Format 2: object with numeric keys → { "0": {...}, "1": {...} }
+  // Numeric-keyed object: { "0": {...}, "1": {...} }
   if (body.data && typeof body.data === "object" && body.data["0"]) {
     return Object.values(body.data);
   }
 
-  // Format 3: array directly
   if (Array.isArray(body.data)) return body.data;
   if (Array.isArray(body))      return body;
 
-  console.error("[metabase] Unexpected response shape:", JSON.stringify(body).slice(0, 300));
+  console.error("[metabase] Unexpected shape:", JSON.stringify(body).slice(0, 300));
   throw new Error("Unexpected Metabase response format");
 }
 
