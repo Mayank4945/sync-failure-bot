@@ -12,8 +12,9 @@
  * 3. git push → Railway redeploys automatically
  */
 const CHAT_TENANT_MAP = {
-  // "918076427750@c.us":    "acmecorp",
+  "918076427750@c.us":    "swish",
   // "120363012345678@g.us": "xyzltd",
+  
 };
 
 function sanitise(s) {
