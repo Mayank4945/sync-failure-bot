@@ -84,3 +84,25 @@ app.listen(PORT, () => {
   console.log(`🚀 Sync Failure Bot running on port ${PORT}`);
   console.log(`   POST /webhook/periskope`);
 });
+
+// ── Debug endpoint — remove after fixing ─────────────────────────────────────
+app.get("/debug-metabase", async (_req, res) => {
+  try {
+    const axios = require("axios");
+    const testRes = await axios.get(
+      `${process.env.METABASE_URL}/api/user/current`,
+      {
+        headers: { "mb-api-key": process.env.METABASE_API_KEY },
+        validateStatus: () => true,
+        maxRedirects: 5,
+      }
+    );
+    res.json({
+      status: testRes.status,
+      contentType: testRes.headers["content-type"],
+      body: typeof testRes.data === "string" ? testRes.data.slice(0, 300) : testRes.data,
+    });
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
