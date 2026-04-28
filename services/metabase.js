@@ -1,8 +1,13 @@
 const axios = require("axios");
 
+const HEADERS = {
+  "Content-Type": "application/json",
+  "mb-api-key": process.env.METABASE_API_KEY,
+};
+
 /**
- * Fetch SYNC_FAILED bills for a tenant from the last 30 days.
- * Auth: Metabase API key — tries both header formats.
+ * Metabase /api/dataset returns 202 + a job token for async queries.
+ * We then poll /api/dataset/:token until the result is ready.
  */
 async function fetchSyncFailures(tenantId) {
   if (!tenantId || tenantId === "mysa") {
@@ -27,58 +32,101 @@ ORDER BY bed.updated_at DESC
 LIMIT 50
   `.trim();
 
-  const payload = {
-    database: Number(process.env.METABASE_DATABASE_ID),
-    type: "native",
-    native: { query: sql },
-  };
+  // Step 1: Submit the query
+  const submitRes = await axios.post(
+    `${process.env.METABASE_URL}/api/dataset`,
+    {
+      database: Number(process.env.METABASE_DATABASE_ID),
+      type: "native",
+      native: { query: sql },
+    },
+    { headers: HEADERS, timeout: 30000 }
+  );
 
-  // Metabase uses 'mb-api-key' header (newer versions)
-  // Fall back to 'x-api-key' if that fails
-  let res;
-  try {
-    res = await axios.post(
-      `${process.env.METABASE_URL}/api/dataset`,
-      payload,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "mb-api-key": process.env.METABASE_API_KEY,
-        },
-        timeout: 30000,
-      }
-    );
-  } catch (err) {
-    // Log full error for debugging
-    console.error("[metabase] Request failed:", err.response?.status, JSON.stringify(err.response?.data || err.message).slice(0, 300));
-    throw err;
+  // Step 2: If sync response with data, parse immediately
+  if (submitRes.data?.data?.cols) {
+    console.log("[metabase] Sync response received");
+    return parseColsRows(submitRes.data.data);
   }
+
+  // Step 3: Async — get the job token and poll
+  const jobToken = submitRes.data?.job_token
+    || submitRes.headers?.["x-metabase-job-token"]
+    || submitRes.data?.token;
+
+  if (!jobToken) {
+    // Last resort — try export endpoint which always returns sync CSV-style JSON
+    console.log("[metabase] No job token, trying export endpoint...");
+    return fetchViaExport(tenantId, sql);
+  }
+
+  console.log(`[metabase] Async job token: ${jobToken} — polling...`);
+  return pollJob(jobToken);
+}
+
+/**
+ * Poll the async job until complete.
+ */
+async function pollJob(jobToken, attempts = 0) {
+  if (attempts > 10) throw new Error("Metabase query timed out after 10 polls");
+
+  await sleep(2000); // wait 2 seconds between polls
+
+  const res = await axios.get(
+    `${process.env.METABASE_URL}/api/dataset/${jobToken}`,
+    { headers: HEADERS, timeout: 15000 }
+  );
 
   const body = res.data;
-  console.log("[metabase] Response status:", res.status, "| body keys:", Object.keys(body || {}).join(", "));
+  console.log(`[metabase] Poll ${attempts + 1} — status: ${res.status} | keys: ${Object.keys(body || {}).join(", ")}`);
 
-  if (!body) throw new Error("Empty response from Metabase");
-  if (body.error) throw new Error(`Metabase error: ${body.error}`);
+  if (body?.data?.cols) return parseColsRows(body.data);
+  if (body?.status === "queued" || body?.status === "running") return pollJob(jobToken, attempts + 1);
+  if (body?.error) throw new Error(`Metabase error: ${body.error}`);
 
-  // Standard format: { data: { cols, rows } }
-  if (body.data?.cols && body.data?.rows) {
-    const { cols, rows } = body.data;
-    const colNames = cols.map((c) => c.name);
-    return rows.map((row) =>
-      Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
-    );
-  }
+  // Still no data — keep polling
+  return pollJob(jobToken, attempts + 1);
+}
 
-  // Numeric-keyed object: { "0": {...}, "1": {...} }
-  if (body.data && typeof body.data === "object" && body.data["0"]) {
-    return Object.values(body.data);
-  }
+/**
+ * Fallback: use the /api/dataset/json export endpoint (always synchronous).
+ */
+async function fetchViaExport(tenantId, sql) {
+  console.log("[metabase] Using export endpoint...");
 
-  if (Array.isArray(body.data)) return body.data;
-  if (Array.isArray(body))      return body;
+  const res = await axios.post(
+    `${process.env.METABASE_URL}/api/dataset/json`,
+    {
+      query: JSON.stringify({
+        database: Number(process.env.METABASE_DATABASE_ID),
+        type: "native",
+        native: { query: sql },
+      }),
+    },
+    {
+      headers: {
+        ...HEADERS,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      timeout: 60000,
+    }
+  );
 
-  console.error("[metabase] Unexpected shape:", JSON.stringify(body).slice(0, 300));
-  throw new Error("Unexpected Metabase response format");
+  if (Array.isArray(res.data)) return res.data;
+
+  console.error("[metabase] Export response:", JSON.stringify(res.data).slice(0, 300));
+  throw new Error("Could not get data from Metabase export endpoint");
+}
+
+function parseColsRows({ cols, rows }) {
+  const colNames = cols.map((c) => c.name);
+  return rows.map((row) =>
+    Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 module.exports = { fetchSyncFailures };
