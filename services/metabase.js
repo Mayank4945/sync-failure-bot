@@ -34,7 +34,9 @@ LIMIT 50`.trim();
     { headers: HEADERS, timeout: 60000, maxRedirects: 5, validateStatus: () => true }
   );
 
-  console.log(`[metabase] Status: ${res.status} | Content-Type: ${res.headers["content-type"]} | Body length: ${JSON.stringify(res.data).length}`);
+  console.log(`[metabase] Status: ${res.status} | Content-Type: ${res.headers["content-type"]}`);
+  console.log(`[metabase] Headers: ${JSON.stringify(res.headers)}`);
+  console.log(`[metabase] Raw response:`, res.data);
   console.log(`[metabase] Body preview: ${JSON.stringify(res.data).slice(0, 500)}`);
 
   const body = res.data;
