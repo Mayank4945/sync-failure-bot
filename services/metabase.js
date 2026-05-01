@@ -3,6 +3,9 @@ const axios = require("axios");
 const HEADERS = {
   "Content-Type": "application/json",
   "X-Api-Key": process.env.METABASE_API_KEY,
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  "Accept": "application/json",
+  "Accept-Language": "en-US,en;q=0.9",
 };
 
 async function fetchSyncFailures(tenantId) {
