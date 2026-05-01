@@ -34,7 +34,7 @@ LIMIT 50`.trim();
   const res = await axios.post(
     url,
     { database: Number(process.env.METABASE_DATABASE_ID), type: "native", native: { query: sql } },
-    { headers: HEADERS, timeout: 60000, maxRedirects: 5, validateStatus: () => true }
+    { headers: HEADERS, timeout: 60000, maxRedirects: 0, validateStatus: () => true }
   );
 
   console.log(`[metabase] Status: ${res.status} | Content-Type: ${res.headers["content-type"]}`);
