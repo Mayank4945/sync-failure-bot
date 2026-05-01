@@ -2,7 +2,7 @@ const axios = require("axios");
 
 const HEADERS = {
   "Content-Type": "application/json",
-  "mb-api-key": process.env.METABASE_API_KEY,
+  "X-Api-Key": process.env.METABASE_API_KEY,
 };
 
 async function fetchSyncFailures(tenantId) {
