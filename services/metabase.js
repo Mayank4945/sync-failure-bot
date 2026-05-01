@@ -68,8 +68,8 @@ LIMIT 50`.trim();
     parsedData = res.data;
   }
 
-  const body = res.data;
-  if (!body || (typeof body === "string" && body.trim() === "")) throw new Error(`Empty response (HTTP ${res.statusCode})`);
+  const responseBody = res.data;
+  if (!responseBody || (typeof responseBody === "string" && responseBody.trim() === "")) throw new Error(`Empty response (HTTP ${res.statusCode})`);
   if (parsedData.error) throw new Error(`Metabase: ${parsedData.error}`);
   if (parsedData.data?.cols) return parseColsRows(parsedData.data);
   if (parsedData.data?.["0"]) return Object.values(parsedData.data);
