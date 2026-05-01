@@ -1,12 +1,5 @@
-const axios = require("axios");
-
-const HEADERS = {
-  "Content-Type": "application/json",
-  "X-Api-Key": process.env.METABASE_API_KEY,
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-  "Accept": "application/json",
-  "Accept-Language": "en-US,en;q=0.9",
-};
+const https = require("https");
+const url = require("url");
 
 async function fetchSyncFailures(tenantId) {
   if (!tenantId || tenantId === "mysa") throw new Error("Invalid tenant_id");
@@ -28,28 +21,61 @@ WHERE bed.tenant_id   = '${tenantId}'
 ORDER BY bed.updated_at DESC
 LIMIT 50`.trim();
 
-  const url = `${process.env.METABASE_URL}/api/dataset`;
-  console.log(`[metabase] POST ${url}`);
+  const apiUrl = `${process.env.METABASE_URL}/api/dataset`;
+  console.log(`[metabase] POST ${apiUrl}`);
 
-  const res = await axios.post(
-    url,
-    { database: Number(process.env.METABASE_DATABASE_ID), type: "native", native: { query: sql } },
-    { headers: HEADERS, timeout: 60000, maxRedirects: 0, validateStatus: () => true }
-  );
+  const body = JSON.stringify({
+    database: Number(process.env.METABASE_DATABASE_ID),
+    type: "native",
+    native: { query: sql }
+  });
 
-  console.log(`[metabase] Status: ${res.status} | Content-Type: ${res.headers["content-type"]}`);
-  console.log(`[metabase] Headers: ${JSON.stringify(res.headers)}`);
-  console.log(`[metabase] Raw response:`, res.data);
-  console.log(`[metabase] Body preview: ${JSON.stringify(res.data).slice(0, 500)}`);
+  const parsedUrl = new url.URL(apiUrl);
+  const options = {
+    hostname: parsedUrl.hostname,
+    port: 443,
+    path: parsedUrl.pathname + parsedUrl.search,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+      "X-Api-Key": process.env.METABASE_API_KEY,
+      "Accept": "application/json"
+    },
+    timeout: 60000
+  };
+
+  const res = await new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        console.log(`[metabase] Status: ${res.statusCode}`);
+        console.log(`[metabase] Headers: ${JSON.stringify(res.headers)}`);
+        console.log(`[metabase] Body preview: ${data.slice(0, 500)}`);
+        resolve({ statusCode: res.statusCode, data, headers: res.headers });
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(60000, () => req.abort());
+    req.write(body);
+    req.end();
+  });
+
+  try {
+    var parsedData = JSON.parse(res.data);
+  } catch (e) {
+    parsedData = res.data;
+  }
 
   const body = res.data;
-  if (!body || (typeof body === "string" && body.trim() === "")) throw new Error(`Empty response (HTTP ${res.status})`);
-  if (body.error) throw new Error(`Metabase: ${body.error}`);
-  if (body.data?.cols) return parseColsRows(body.data);
-  if (body.data?.["0"]) return Object.values(body.data);
-  if (Array.isArray(body)) return body;
+  if (!body || (typeof body === "string" && body.trim() === "")) throw new Error(`Empty response (HTTP ${res.statusCode})`);
+  if (parsedData.error) throw new Error(`Metabase: ${parsedData.error}`);
+  if (parsedData.data?.cols) return parseColsRows(parsedData.data);
+  if (parsedData.data?.["0"]) return Object.values(parsedData.data);
+  if (Array.isArray(parsedData)) return parsedData;
 
-  throw new Error(`Unexpected format. Keys: ${Object.keys(body || {}).join(", ")}`);
+  throw new Error(`Unexpected format. Keys: ${Object.keys(parsedData || {}).join(", ")}`);
 }
 
 function parseColsRows({ cols, rows }) {
