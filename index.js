@@ -139,6 +139,62 @@ async function handleMessage({ chatId, text }) {
   console.log("[3/3] Done ✓");
 }
 
+// ── Custom Tool Endpoint (called by Periskope) ───────────────────────────────
+// Generates a professional response for sync failures
+app.post("/custom-tool/generate-response", (req, res) => {
+  try {
+    const { sync_failures, team_instruction } = req.body;
+
+    if (!sync_failures || !team_instruction) {
+      return res.status(400).json({
+        error: "Missing required parameters: sync_failures, team_instruction"
+      });
+    }
+
+    // Generate professional response
+    const response = generateSyncFailureResponse(sync_failures, team_instruction);
+
+    console.log(`[custom-tool] Generated response for customer`);
+
+    res.json({
+      success: true,
+      message: response,
+      generated_at: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("[custom-tool] Error:", err.message);
+    res.status(500).json({
+      error: "Failed to generate response",
+      details: err.message
+    });
+  }
+});
+
+// ── Response Generator ──────────────────────────────────────────────────────
+function generateSyncFailureResponse(syncFailures, teamInstruction) {
+  // Parse sync failures if it's a string
+  let failures = syncFailures;
+  if (typeof syncFailures === 'string') {
+    failures = syncFailures;
+  }
+
+  const response = `Hello! 👋
+
+Thank you for reporting the sync failures. Our team has reviewed the issues and we're here to help!
+
+*Issues Found:*
+${failures}
+
+*Recommended Solution:*
+${teamInstruction}
+
+Please follow these steps to resolve the sync failures. If you need any clarification or continue to experience issues, please don't hesitate to reach out.
+
+We're here to support you! 😊`;
+
+  return response;
+}
+
 // ── Slack Events API ──────────────────────────────────────────────────────────
 // Listens for messages in threads of bot's sync failure posts
 app.post("/slack/events", (req, res) => {
