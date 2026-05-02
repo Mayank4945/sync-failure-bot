@@ -1,37 +1,23 @@
 const axios = require("axios");
 
 /**
- * Send message to Periskope AI and get response
+ * Send message to customer with sync failures + team instruction
+ * Periskope AI Agent will automatically respond based on activation rules
  */
-async function sendToPeriskopeAI(chatId, syncFailures, teamInstruction) {
-  const prompt = `
-You are a helpful customer support AI assistant for Mysa accounting sync failures.
-
-A customer reported sync failures in their accounting software. The team has reviewed the issues and provided guidance.
-
-**Sync Failures:**
-${syncFailures}
-
-**Team Instruction/Solution:**
-${teamInstruction}
-
-Please compose a professional, friendly message to inform the customer about the solution. Include:
-1. Acknowledgment of their issue
-2. The recommended actions they need to take
-3. Clear step-by-step instructions
-4. Offer further assistance if needed
-
-Keep the message concise but comprehensive.`;
-
+async function sendInstructionToCustomer(chatId, syncFailures, teamInstruction) {
   try {
-    const endpoint = `${process.env.PERISKOPE_BASE_URL}/message/send`;
-    console.log(`[periskope] Calling: POST ${endpoint}`);
+    // Format the message with sync failures and team instruction
+    const formattedFailures = formatSyncFailuresForAI(syncFailures);
+    
+    const message = `*🔴 Sync Failures Report*\n\n${formattedFailures}\n\n*Team Solution:*\n${teamInstruction}\n\nPlease implement the recommended actions to resolve these sync failures.`;
+
+    console.log(`[periskope] Sending instruction to customer — chat_id: ${chatId}`);
     
     const response = await axios.post(
-      endpoint,
+      `${process.env.PERISKOPE_BASE_URL}/message/send`,
       {
         chat_id: chatId,
-        message: prompt,
+        message: message,
       },
       {
         headers: {
@@ -43,7 +29,8 @@ Keep the message concise but comprehensive.`;
     );
 
     if (response.status === 200 || response.status === 201) {
-      console.log(`[periskope] ✓ Message queued — queue_id: ${response.data.queue_id}`);
+      console.log(`[periskope] ✓ Message sent — queue_id: ${response.data.queue_id}`);
+      console.log(`[periskope] ℹ️ Periskope AI Agent will process and respond automatically`);
       return response.data;
     } else {
       console.error(`[periskope] Failed to send message:`, response.data);
@@ -74,4 +61,4 @@ function formatSyncFailuresForAI(rows) {
     .join("\n\n");
 }
 
-module.exports = { sendToPeriskopeAI, formatSyncFailuresForAI };
+module.exports = { sendInstructionToCustomer, formatSyncFailuresForAI };

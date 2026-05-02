@@ -5,7 +5,7 @@ const crypto = require("crypto");
 const { fetchSyncFailures } = require("./services/metabase");
 const { postSyncAlert }     = require("./services/slack");
 const { resolveTenantId }   = require("./services/tenantMapper");
-const { sendToPeriskopeAI, formatSyncFailuresForAI } = require("./services/periskope");
+const { sendInstructionToCustomer, formatSyncFailuresForAI } = require("./services/periskope");
 
 const app = express();
 
@@ -217,13 +217,14 @@ async function handleSlackThreadMessage(event) {
   console.log(`[slack-thread] Team instruction: "${threadMessage.slice(0, 100)}..."`);
 
   try {
-    // Format sync failures for AI
+    // Format sync failures for message
     const formattedFailures = formatSyncFailuresForAI(syncFailures.rows);
 
-    // Send to Periskope AI
-    await sendToPeriskopeAI(syncFailures.chatId, formattedFailures, threadMessage);
+    // Send instruction to customer
+    // Periskope AI Agent will automatically process and respond
+    await sendInstructionToCustomer(syncFailures.chatId, syncFailures.rows, threadMessage);
 
-    console.log(`[slack-thread] ✓ Periskope message sent to customer`);
+    console.log(`[slack-thread] ✓ Instruction sent to customer — AI Agent will respond`);
   } catch (err) {
     console.error("[slack-thread] Failed to process:", err.message);
   }
