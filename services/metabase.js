@@ -5,20 +5,127 @@ async function fetchSyncFailures(tenantId) {
   if (!tenantId || tenantId === "mysa") throw new Error("Invalid tenant_id");
 
   const sql = `
+WITH base AS (
+  SELECT
+    tenant_id,
+    reference_id,
+    type,
+    status,
+    comments,
+    vendor_id,
+    updated_at,
+    meta_data,
+    last_modified_by,
+    zoho_id
+  FROM talipot.bill_eligible_data
+  WHERE status = 'SYNC_FAILED'
+    AND excluded = 0
+    AND (
+      tenant_id IS NULL
+      OR tenant_id NOT IN (
+        'aemt','akdemo','akmtyes','arnavdemo','demotally','prof','qaprod',
+        'rudrademo','saidemo','testassembly','testaugnito','testdpd',
+        'testgurujana','testhackerearth','testkouzina','testmdepot','testprime',
+        'testrigi','testsep','testjeevika','testultra','tlqa','trof','vmysa'
+      )
+    )
+),
+
+error_data AS (
+  SELECT
+    b.reference_id,
+    ed.value::VARCHAR AS err_msg
+  FROM base b,
+       b.meta_data.error.errorData AS ed
+),
+
+info_data AS (
+  SELECT
+    b.reference_id,
+    inf.value::VARCHAR AS err_msg
+  FROM base b,
+       b.meta_data.error.error[0].information AS inf
+),
+
+final_errors AS (
+  SELECT
+    b.tenant_id,
+    b.reference_id,
+    b.type,
+    b.status,
+    COALESCE(
+      ed.err_msg,
+      inf.err_msg,
+      b.meta_data.error.error[0].message::VARCHAR,
+      b.meta_data.error.status.statusMessage::VARCHAR,
+      b.comments
+    ) AS full_error,
+    b.vendor_id,
+    b.zoho_id,
+    b.updated_at,
+    b.last_modified_by
+  FROM base b
+  LEFT JOIN error_data ed ON b.reference_id = ed.reference_id
+  LEFT JOIN info_data  inf ON b.reference_id = inf.reference_id
+)
+
 SELECT
-  bed.reference_id                                                      AS reference_id,
-  bed.bill_number                                                       AS bill_number,
-  bed.vendor_name                                                       AS vendor_name,
-  bed.status                                                            AS status,
-  COALESCE(meta_data.error.error[0].error::varchar,    '(no type)')    AS error_type,
-  COALESCE(meta_data.error.error[0].message::varchar,  '(no message)') AS error_message,
-  bed.updated_at                                                        AS updated_at
-FROM talipot.bill_eligible_data bed
-WHERE bed.tenant_id   = '${tenantId}'
-  AND bed.tenant_id  != 'mysa'
-  AND bed.status      = 'SYNC_FAILED'
-  AND bed.updated_at >= DATEADD(day, -30, CURRENT_DATE)
-ORDER BY bed.updated_at DESC
+  c.reference_id,
+  c.full_error AS raw_error,
+  CASE
+    WHEN c.full_error ILIKE '%type=%'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*type=', ''),
+           '[,}].*',
+           ''
+         )
+    WHEN c.full_error LIKE '%:::%:::%'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*:::[ ]*', ''),
+           '[ ]*:::.*',
+           ''
+         )
+    WHEN c.full_error ILIKE '%Ledger%' AND c.full_error ILIKE '%does not exist%'
+    THEN 'Ledger'
+    ELSE NULL
+  END AS identifier_name,
+  CASE
+    WHEN c.full_error ILIKE '%Ledger %does not exist%'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*Ledger ''', ''),
+           '''.*',
+           ''
+         )
+    WHEN c.full_error LIKE '%[%]%'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*\\\\[', ''),
+           '\\\\].*',
+           ''
+         )
+    WHEN c.full_error ILIKE '%mysaId=%'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*mysaId=', ''),
+           '[,}].*',
+           ''
+         )
+    WHEN c.full_error ILIKE '%zohoId=%'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*zohoId=', ''),
+           '[,}].*',
+           ''
+         )
+    WHEN c.full_error ILIKE '%identifier %'
+    THEN REGEXP_REPLACE(
+           REGEXP_REPLACE(c.full_error, '.*identifier ', ''),
+           '[ ,].*',
+           ''
+         )
+    ELSE NULL
+  END AS identifier_value
+
+FROM final_errors c
+WHERE c.tenant_id = '${tenantId}'
+ORDER BY c.updated_at DESC
 LIMIT 50`.trim();
 
   const apiUrl = `${process.env.METABASE_URL}/api/dataset`;
